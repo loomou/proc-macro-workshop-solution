@@ -1,0 +1,10 @@
+[workspace]
+members = [
+    "bitfield",
+    "builder",
+    "debug",
+    "seq",
+    "sorted",
+]
+
+resolver = "2"
