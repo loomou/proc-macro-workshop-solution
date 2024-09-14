@@ -1,11 +1,13 @@
 use proc_macro::TokenStream;
 use proc_macro2::{Ident, TokenStream as TokenStream2};
 use quote::{format_ident, quote};
-use syn::{parse_macro_input, DataStruct, DeriveInput, Error, Field, FieldsNamed, Result, Type};
+use syn::{parse_macro_input, AngleBracketedGenericArguments, DataStruct, DeriveInput, Error, Field, FieldsNamed, GenericArgument, PathSegment, Result, Type, TypePath};
 use syn::Data::Struct;
 use syn::Fields::Named;
+use syn::PathArguments::AngleBracketed;
 use syn::punctuated::Punctuated;
 use syn::token::Comma;
+use syn::Type::Path;
 
 #[proc_macro_derive(Builder)]
 pub fn derive(input: TokenStream) -> TokenStream {
@@ -29,6 +31,7 @@ fn expand(derive_input: &DeriveInput) -> Result<TokenStream2> {
         generate_builder_setter_methods(&derive_input_fields_name_and_type);
     let builder_build_method =
         generate_builder_build_method(&derive_input_fields_name_and_type, ident);
+
 
     Ok(
         quote! {
@@ -85,10 +88,12 @@ fn generate_builder_struct_fields_and_init_fields(
     let mut builder_struct_fields = Vec::new();
     let mut builder_struct_init_fields = Vec::new();
 
-    for (field_name, field_type) in field_name_and_type {
+    for (field_name, raw_field_type) in field_name_and_type {
+        let field_type = get_type(raw_field_type);
         builder_struct_fields.push(
             quote! { #field_name: Option<#field_type> },
         );
+
         builder_struct_init_fields.push(
             quote! {  #field_name: None },
         );
@@ -101,7 +106,8 @@ fn generate_builder_setter_methods(
     field_name_and_type: &Vec<(&Option<Ident>, &Type)>
 ) -> Vec<TokenStream2> {
     field_name_and_type.iter().map(|name_and_type| {
-        let (name, ty) = name_and_type;
+        let (name, raw_ty) = name_and_type;
+        let ty = get_type(raw_ty);
         quote! {
             pub fn #name(&mut self, #name: #ty) -> &mut Self {
                 self.#name = Some(#name);
@@ -118,20 +124,28 @@ fn generate_builder_build_method(
     let mut check_fields = Vec::new();
     let mut build_fields = Vec::new();
 
-    for (name, _) in field_name_and_type {
-        check_fields.push(
-            quote! {
-                if self.#name.is_none() {
-                    let err_msg = format!("{} field missing", stringify!(#name));
-                    return Err(err_msg.into());
+    for (name, raw_ty) in field_name_and_type {
+        if is_option(raw_ty).is_none() {
+            check_fields.push(
+                quote! {
+                    if self.#name.is_none() {
+                        let err_msg = format!("{} field missing", stringify!(#name));
+                        return Err(err_msg.into());
+                    }
                 }
-            }
-        );
-        build_fields.push(
-            quote! {
+            );
+            build_fields.push(
+                quote! {
                 #name: self.#name.clone().unwrap(),
             }
-        );
+            );
+        } else {
+            build_fields.push(
+                quote! {
+                #name: self.#name.clone(),
+            }
+            );
+        }
     }
 
     quote! {
@@ -143,4 +157,38 @@ fn generate_builder_build_method(
             })
         }
     }
+}
+
+fn get_type(ty: &Type) -> &Type {
+    if let Some(seg) = is_option(ty) {
+        if let AngleBracketed(
+            AngleBracketedGenericArguments {
+                ref args,
+                ..
+            }) = seg.arguments
+        {
+            if let Some(GenericArgument::Type(inner_ty)) = args.first() {
+                return inner_ty;
+            }
+        }
+    }
+
+    ty
+}
+
+fn is_option(ty: &Type) -> Option<&PathSegment> {
+    if let Path(
+        TypePath {
+            ref path,
+            ..
+        }
+    ) = ty {
+        if let Some(seg) = path.segments.last() {
+            if seg.ident == "Option" {
+                return Some(seg);
+            }
+        }
+    }
+
+    None
 }
