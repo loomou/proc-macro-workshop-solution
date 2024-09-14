@@ -24,7 +24,8 @@ fn expand(derive_input: &DeriveInput) -> Result<TokenStream2> {
     let derive_input_fields = get_derive_input_fields(derive_input)?;
     let derive_input_fields_name_and_type = get_derive_input_fields_name_and_type(derive_input_fields);
     let (builder_struct_fields, builder_struct_init_fields) =
-        generate_builder_struct_fields_and_init_fields(derive_input_fields_name_and_type);
+        generate_builder_struct_fields_and_init_fields(&derive_input_fields_name_and_type);
+    let builder_setter_methods = generate_builder_setter_methods(&derive_input_fields_name_and_type);
 
     Ok(
         quote! {
@@ -37,6 +38,9 @@ fn expand(derive_input: &DeriveInput) -> Result<TokenStream2> {
                         #(#builder_struct_init_fields),*
                     }
                 }
+            }
+            impl #builder_name_literal {
+                #(#builder_setter_methods)*
             }
         }
     )
@@ -72,7 +76,7 @@ fn get_name_and_type(field: &Field) -> (&Option<Ident>, &Type) {
 }
 
 fn generate_builder_struct_fields_and_init_fields(
-    field_name_and_type: Vec<(&Option<Ident>, &Type)>
+    field_name_and_type: &Vec<(&Option<Ident>, &Type)>
 ) -> (Vec<TokenStream2>, Vec<TokenStream2>) {
     let mut builder_struct_fields = Vec::new();
     let mut builder_struct_init_fields = Vec::new();
@@ -87,4 +91,18 @@ fn generate_builder_struct_fields_and_init_fields(
     }
 
     (builder_struct_fields, builder_struct_init_fields)
+}
+
+fn generate_builder_setter_methods(
+    field_name_and_type: &Vec<(&Option<Ident>, &Type)>
+) -> Vec<TokenStream2> {
+    field_name_and_type.iter().map(|name_and_type| {
+        let (name, ty) = name_and_type;
+        quote! {
+            pub fn #name(&mut self, #name: #ty) -> &mut Self {
+                self.#name = Some(#name);
+                self
+            }
+        }
+    }).collect()
 }
