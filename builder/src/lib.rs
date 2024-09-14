@@ -19,13 +19,16 @@ pub fn derive(input: TokenStream) -> TokenStream {
 
 fn expand(derive_input: &DeriveInput) -> Result<TokenStream2> {
     let ident = &derive_input.ident;
-    let builder_name_literal = format_ident!("{}Builder", ident.to_string());
+    let builder_name_literal = format_ident!("{}Builder", ident);
 
     let derive_input_fields = get_derive_input_fields(derive_input)?;
     let derive_input_fields_name_and_type = get_derive_input_fields_name_and_type(derive_input_fields);
     let (builder_struct_fields, builder_struct_init_fields) =
         generate_builder_struct_fields_and_init_fields(&derive_input_fields_name_and_type);
-    let builder_setter_methods = generate_builder_setter_methods(&derive_input_fields_name_and_type);
+    let builder_setter_methods =
+        generate_builder_setter_methods(&derive_input_fields_name_and_type);
+    let builder_build_method =
+        generate_builder_build_method(&derive_input_fields_name_and_type, ident);
 
     Ok(
         quote! {
@@ -41,6 +44,7 @@ fn expand(derive_input: &DeriveInput) -> Result<TokenStream2> {
             }
             impl #builder_name_literal {
                 #(#builder_setter_methods)*
+                #builder_build_method
             }
         }
     )
@@ -105,4 +109,38 @@ fn generate_builder_setter_methods(
             }
         }
     }).collect()
+}
+
+fn generate_builder_build_method(
+    field_name_and_type: &Vec<(&Option<Ident>, &Type)>,
+    ident: &Ident,
+) -> TokenStream2 {
+    let mut check_fields = Vec::new();
+    let mut build_fields = Vec::new();
+
+    for (name, _) in field_name_and_type {
+        check_fields.push(
+            quote! {
+                if self.#name.is_none() {
+                    let err_msg = format!("{} field missing", stringify!(#name));
+                    return Err(err_msg.into());
+                }
+            }
+        );
+        build_fields.push(
+            quote! {
+                #name: self.#name.clone().unwrap(),
+            }
+        );
+    }
+
+    quote! {
+        pub fn build(&mut self) -> std::result::Result<#ident, std::boxed::Box<dyn std::error::Error>> {
+            #(#check_fields)*
+
+            Ok(#ident {
+                #(#build_fields)*
+            })
+        }
+    }
 }
